@@ -110,14 +110,14 @@ void increaseAirFlow();
 void decreaseAirFlow();
 void notFound(AsyncWebServerRequest *request);
 std::string valFromJson(const std::string &json, const std::string &element);
+bool wifiConnect(WiFiMode m);
+void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len);
+void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus);
 bool saveBounds();
 void setBounds(const std::string& s);
 bool initLocalStruct();
-void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len);
-void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus);
 bool initCreds();
 void setCreds(const std::string& s);
-bool wifiConnect(WiFiMode m);
 bool saveCreds();
 
 IPAddress  // soft AP IP info
@@ -150,9 +150,7 @@ typedef struct WifiCreds_t{
         return(s);
       }
 } WifiCreds_t;
-
 WifiCreds_t creds;
-
 
 typedef struct measurements{
             float oat;              // outside air temp;
@@ -185,7 +183,6 @@ typedef struct measurements{
             return(std::string(c,n));
         }
 } measurements;
-
 measurements vals;
 
 U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C u8x8(U8G2_R0, U8X8_PIN_NONE, 5, 4);
@@ -198,338 +195,338 @@ tiny::BME280 mySensorB; //Uses I2C address 0x76 (jumper closed)
 Servo damperServo;
 Servo damperFan;
 
-void setup() {
-  Serial.begin(115200);
+  void setup() {
+    Serial.begin(115200);
 
-  SPIFFS.begin();
+    SPIFFS.begin();
 
-  AP_MODE=!initCreds();
-  AP_MODE=AP_MODE || !wifiConnect(WIFI_STA);
+    AP_MODE=!initCreds();
+    AP_MODE=AP_MODE || !wifiConnect(WIFI_STA);
 
-  if(AP_MODE){
-        wifiConnect(WIFI_AP);
+    if(AP_MODE){
+          wifiConnect(WIFI_AP);
 
-        // init Websock
-        webSock.onEvent(onWsEvent);
-        server.addHandler(&webSock);
-              /* Setup the DNS server redirecting all the domains to the apIP */
-        dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
-        dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
-        server.onNotFound(notFound);
+          // init Websock
+          webSock.onEvent(onWsEvent);
+          server.addHandler(&webSock);
+                /* Setup the DNS server redirecting all the domains to the apIP */
+          dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+          dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+          server.onNotFound(notFound);
 
-        // Web Pages
-        server.on("/"        , HTTP_GET, [](AsyncWebServerRequest *request){request->send_P(200, "text/html", SSIDPWD_HTML);});
+          // Web Pages
+          server.on("/"        , HTTP_GET, [](AsyncWebServerRequest *request){request->send_P(200, "text/html", SSIDPWD_HTML);});
 
-        AsyncElegantOTA.begin(&server);    // Start ElegantOTA
-        server.onNotFound(notFound);
-        server.begin();
-  // END: Get Credentials "AP_MODE"
-  }else{// NOT get WiFi Credentials
-        Wire.begin(4,5);  // I2C bmp1, bmp2, OLED
-        timeClient.begin();
-        timeClient.update();
-        vals.today=timeClient.getDay(); // timeClient to determine 1st day of month and 00:00 each day
-        vals.lastMillis=millis();       // init struct's seconds since epoch: 19700101  000000
-        initLocalStruct();
-        analogWriteMode(SERVO_PIN, 255, OUTPUT_OPEN_DRAIN);
-        analogWriteFreq(1000);
+          AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+          server.onNotFound(notFound);
+          server.begin();
+    // END: Get Credentials "AP_MODE"
+    }else{// NOT get WiFi Credentials
+          Wire.begin(4,5);  // I2C bmp1, bmp2, OLED
+          timeClient.begin();
+          timeClient.update();
+          vals.today=timeClient.getDay(); // timeClient to determine 1st day of month and 00:00 each day
+          vals.lastMillis=millis();       // init struct's seconds since epoch: 19700101  000000
+          initLocalStruct();
+          analogWriteMode(SERVO_PIN, 255, OUTPUT_OPEN_DRAIN);
+          analogWriteFreq(1000);
 
-        damperServo.attach(SERVO_PIN);   // pin servoPin PWM
-        vals.draftDamperPos=MAX_DAMPER;
-        damperServo.write(vals.draftDamperPos);   // move to damperClosed
+          damperServo.attach(SERVO_PIN);   // pin servoPin PWM
+          vals.draftDamperPos=MAX_DAMPER;
+          damperServo.write(vals.draftDamperPos);   // move to damperClosed
 
-        damperFan.attach(DRAFT_FAN_PIN);
-        vals.draftFanPct=MIN_FAN;
+          damperFan.attach(DRAFT_FAN_PIN);
+          vals.draftFanPct=MIN_FAN;
+          damperFan.write(vals.draftFanPct);
+          
+          pinMode(HOT_FLOW_PIN, INPUT_PULLDOWN_16);             //initializes digital pin hotFlowPin as an input
+          pinMode(MAIN_FLOW_PIN, INPUT_PULLDOWN_16);            //initializes digital pin mainFlowPin as an input
+
+          digitalPinToInterrupt(MAIN_FLOW_PIN);
+          attachInterrupt(MAIN_FLOW_PIN, pulseCounter, RISING);  //and the interrupt is attached
+
+          pinMode(LEAK_DETECTOR_PIN, INPUT_PULLDOWN_16);   // INPUT_PULLDOWN_16
+          pinMode(LEAK_LIGHT_PIN, OUTPUT);digitalWrite(LEAK_LIGHT_PIN, false); // Hot Water Tank is Leaking Light
+
+          mySensorA.setI2CAddress(0x77); //This is also the default value: I2C address must be set before begin()
+          mySensorB.setI2CAddress(0x76); //This is also the default value: I2C address must be set before begin()
+
+          if (mySensorA.begin() == false)Serial.println("Sensor A \"outside\" connect failed");
+          if (mySensorB.beginI2C(0x76) == false)Serial.println("Sensor B \"inside\" connect failed");
+        yield(); // I break for unicorns
+          u8x8.begin();
+          u8x8.setPowerSave(0);
+
+          esp_now_init();
+          esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+          esp_now_register_send_cb(OnDataSent);
+          esp_now_register_recv_cb(OnDataRecv);
+          esp_now_add_peer(peer, ESP_NOW_ROLE_COMBO, 3, NULL, 0);
+
+          // init Websock
+          webSock.onEvent(onWsEvent);
+          server.addHandler(&webSock);
+
+          // Web Pages
+          server.on("/"        , HTTP_GET, [](AsyncWebServerRequest *request){request->send_P(200, "text/html", INDEX_HTML);});
+          server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request){request->send_P(200, "text/html", SETTINGS_HTML);});
+
+          AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+          server.onNotFound(notFound);
+          server.begin();
+    } // END: functional setup()
+  }
+  void loop() {
+    if(AP_MODE)return;
+
+    char line1[32], line2[32], line3[32];
+
+    if(vals.today != timeClient.getDay()){ // if New Day
+      vals.today = timeClient.getDay();
+      vals.mainGallonsToday = 0;
+      vals.hotGallonsToday = 0;
+
+      time_t rawtime = timeClient.getEpochTime();
+      struct tm * ti;
+      ti = localtime (&rawtime);
+
+      // if new day && Bill Day then reset total gallons
+      if(vals.billDay == ti->tm_mday && (!ti->tm_min && !ti->tm_sec) && vals.mainGallonsTotal >10){  // 00:00:00 on bill day and haven't reset yet?
+        vals.mainGallonsTotal = 0;
+        vals.hotGallonsTotal = 0;
+      } // END Bill Day
+    } // END NEW DAY
+
+    if(millis()-vals.lastMillis > UPDATE_MILLIS){ // if time to update values???
+        ets_intr_lock();       // IRQ Disable
+        bufferHotTicks = hotFlowTicks;
+        bufferMainTicks = mainFlowTicks;
+        mainFlowTicks = 0;
+        hotFlowTicks  = 0;
+        ets_intr_unlock();    // IRQ Enable
+
+  #ifdef dbg
+    Serial.printf("MainFlow Ticks: %i, HotFlow Ticks: %i\n", bufferMainTicks, bufferHotTicks);Serial.flush();
+  #endif
+
+        vals.mainFlowGPM = (bufferMainTicks/TICKS_PER_GALLON_MAIN)*(60000/(millis()-vals.lastMillis));
+        vals.hotFlowGPM  = (bufferHotTicks/TICKS_PER_GALLON_HOT)*(60000/(millis()-vals.lastMillis));
+      
+        vals.mainGallonsToday += bufferMainTicks/TICKS_PER_GALLON_MAIN;
+        vals.mainGallonsTotal += bufferMainTicks/TICKS_PER_GALLON_MAIN;
+        vals.hotGallonsToday  += bufferHotTicks/TICKS_PER_GALLON_HOT;
+        vals.hotGallonsTotal  += bufferHotTicks/TICKS_PER_GALLON_HOT;
+
+        // GET bmp280: temp, pressure, humidity READINGS
+        vals.oat=mySensorA.readFixedTempF() / 100.0f;
+        vals.oap=mySensorA.readFixedPressure()* 0.000295f; // outside pressure Pa
+        vals.oah=mySensorA.readFixedHumidity();
+        vals.iat=mySensorB.readFixedTempF() / 100.0f;
+        vals.iap=mySensorB.readFixedPressure() *0.000295f; // inside pressure Pa
+        vals.iah=mySensorB.readFixedHumidity();
+
+        if(vals.oap - vals.iap > vals.pressureDelta)increaseAirFlow();
+        if(vals.iap - vals.oap > vals.pressureDelta)decreaseAirFlow();
+
+        damperServo.write(vals.draftDamperPos);
         damperFan.write(vals.draftFanPct);
-        
-        pinMode(HOT_FLOW_PIN, INPUT_PULLDOWN_16);             //initializes digital pin hotFlowPin as an input
-        pinMode(MAIN_FLOW_PIN, INPUT_PULLDOWN_16);            //initializes digital pin mainFlowPin as an input
 
-        digitalPinToInterrupt(MAIN_FLOW_PIN);
-        attachInterrupt(MAIN_FLOW_PIN, pulseCounter, RISING);  //and the interrupt is attached
+        vals.waterSensor = analogRead(LEAK_DETECTOR_PIN);
+        digitalWrite(LEAK_LIGHT_PIN, vals.waterSensor>vals.waterAlert);
 
-        pinMode(LEAK_DETECTOR_PIN, INPUT_PULLDOWN_16);   // INPUT_PULLDOWN_16
-        pinMode(LEAK_LIGHT_PIN, OUTPUT);digitalWrite(LEAK_LIGHT_PIN, false); // Hot Water Tank is Leaking Light
+        sprintf(line1, "OAT %.2f  OAP %.2f  OAH %i",  vals.oat, vals.oap, vals.oah);
+        sprintf(line2, "IAT %.2f  IAP %.2f  IAH %i",  vals.iat, vals.iap, vals.iah);
+  //      sprintf(line3, "Damper %i %s", maxDamper-vals.draftDamperPos, vals.waterSensor>900?"FLOOD":"");
+        sprintf(line3, "Damper %i G: %i, WS: %i", MAX_DAMPER-vals.draftDamperPos, vals.mainGallonsToday, vals.waterSensor);
 
-        mySensorA.setI2CAddress(0x77); //This is also the default value: I2C address must be set before begin()
-        mySensorB.setI2CAddress(0x76); //This is also the default value: I2C address must be set before begin()
+        Serial.println(line1);
+        Serial.printf("%s\tp1: %1.2f\tp2: %.2f\tp1-p2: %.2f\n", line2, vals.oap, vals.iap, vals.oap-vals.iap);
+        Serial.printf("%s\n", line3);
+        Serial.printf("\n******************>> IP: %s <<*****************************\n\n", WiFi.localIP().toString().c_str());
 
-        if (mySensorA.begin() == false)Serial.println("Sensor A \"outside\" connect failed");
-        if (mySensorB.beginI2C(0x76) == false)Serial.println("Sensor B \"inside\" connect failed");
-      yield(); // I break for unicorns
-        u8x8.begin();
-        u8x8.setPowerSave(0);
+        u8x8.clearBuffer();
+        u8x8.setFlipMode(1);
+        u8x8.setFont(u8g2_font_6x10_tr);
+        u8x8.drawStr(3,11,line1);
+        u8x8.drawStr(3,20,line2);
+        u8x8.drawStr(3,29,line3);
+        u8x8.drawRFrame(0,0,128,32,3);
+        u8x8.sendBuffer();
 
-        esp_now_init();
-        esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-        esp_now_register_send_cb(OnDataSent);
-        esp_now_register_recv_cb(OnDataRecv);
-        esp_now_add_peer(peer, ESP_NOW_ROLE_COMBO, 3, NULL, 0);
+        webSock.textAll(vals.toStr().c_str()); delay(1);
+        webSock.cleanupClients();
+        vals.lastMillis=millis();
+    } // END: Update vals
 
-        // init Websock
-        webSock.onEvent(onWsEvent);
-        server.addHandler(&webSock);
-
-        // Web Pages
-        server.on("/"        , HTTP_GET, [](AsyncWebServerRequest *request){request->send_P(200, "text/html", INDEX_HTML);});
-        server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request){request->send_P(200, "text/html", SETTINGS_HTML);});
-
-        AsyncElegantOTA.begin(&server);    // Start ElegantOTA
-        server.onNotFound(notFound);
-        server.begin();
-  } // END: functional setup()
-}
-void loop() {
-  if(AP_MODE)return;
-
-  char line1[32], line2[32], line3[32];
-
-  if(vals.today != timeClient.getDay()){ // if New Day
-    vals.today = timeClient.getDay();
-    vals.mainGallonsToday = 0;
-    vals.hotGallonsToday = 0;
-
-    time_t rawtime = timeClient.getEpochTime();
-    struct tm * ti;
-    ti = localtime (&rawtime);
-
-    // if new day && Bill Day then reset total gallons
-    if(vals.billDay == ti->tm_mday && (!ti->tm_min && !ti->tm_sec) && vals.mainGallonsTotal >10){  // 00:00:00 on bill day and haven't reset yet?
-      vals.mainGallonsTotal = 0;
-      vals.hotGallonsTotal = 0;
-    } // END Bill Day
-  } // END NEW DAY
-
-  if(millis()-vals.lastMillis > UPDATE_MILLIS){ // if time to update values???
-      ets_intr_lock();       // IRQ Disable
-      bufferHotTicks = hotFlowTicks;
-      bufferMainTicks = mainFlowTicks;
-      mainFlowTicks = 0;
-      hotFlowTicks  = 0;
-      ets_intr_unlock();    // IRQ Enable
-
-#ifdef dbg
-  Serial.printf("MainFlow Ticks: %i, HotFlow Ticks: %i\n", bufferMainTicks, bufferHotTicks);Serial.flush();
-#endif
-
-      vals.mainFlowGPM = (bufferMainTicks/TICKS_PER_GALLON_MAIN)*(60000/(millis()-vals.lastMillis));
-      vals.hotFlowGPM  = (bufferHotTicks/TICKS_PER_GALLON_HOT)*(60000/(millis()-vals.lastMillis));
-    
-      vals.mainGallonsToday += bufferMainTicks/TICKS_PER_GALLON_MAIN;
-      vals.mainGallonsTotal += bufferMainTicks/TICKS_PER_GALLON_MAIN;
-      vals.hotGallonsToday  += bufferHotTicks/TICKS_PER_GALLON_HOT;
-      vals.hotGallonsTotal  += bufferHotTicks/TICKS_PER_GALLON_HOT;
-
-      // GET bmp280: temp, pressure, humidity READINGS
-      vals.oat=mySensorA.readFixedTempF() / 100.0f;
-      vals.oap=mySensorA.readFixedPressure()* 0.000295f; // outside pressure Pa
-      vals.oah=mySensorA.readFixedHumidity();
-      vals.iat=mySensorB.readFixedTempF() / 100.0f;
-      vals.iap=mySensorB.readFixedPressure() *0.000295f; // inside pressure Pa
-      vals.iah=mySensorB.readFixedHumidity();
-
-      if(vals.oap - vals.iap > vals.pressureDelta)increaseAirFlow();
-      if(vals.iap - vals.oap > vals.pressureDelta)decreaseAirFlow();
-
-      damperServo.write(vals.draftDamperPos);
-      damperFan.write(vals.draftFanPct);
-
-      vals.waterSensor = analogRead(LEAK_DETECTOR_PIN);
-      digitalWrite(LEAK_LIGHT_PIN, vals.waterSensor>vals.waterAlert);
-
-      sprintf(line1, "OAT %.2f  OAP %.2f  OAH %i",  vals.oat, vals.oap, vals.oah);
-      sprintf(line2, "IAT %.2f  IAP %.2f  IAH %i",  vals.iat, vals.iap, vals.iah);
-//      sprintf(line3, "Damper %i %s", maxDamper-vals.draftDamperPos, vals.waterSensor>900?"FLOOD":"");
-      sprintf(line3, "Damper %i G: %i, WS: %i", MAX_DAMPER-vals.draftDamperPos, vals.mainGallonsToday, vals.waterSensor);
-
-      Serial.println(line1);
-      Serial.printf("%s\tp1: %1.2f\tp2: %.2f\tp1-p2: %.2f\n", line2, vals.oap, vals.iap, vals.oap-vals.iap);
-      Serial.printf("%s\n", line3);
-      Serial.printf("\n******************>> IP: %s <<*****************************\n\n", WiFi.localIP().toString().c_str());
-
-      u8x8.clearBuffer();
-      u8x8.setFlipMode(1);
-      u8x8.setFont(u8g2_font_6x10_tr);
-      u8x8.drawStr(3,11,line1);
-      u8x8.drawStr(3,20,line2);
-      u8x8.drawStr(3,29,line3);
-      u8x8.drawRFrame(0,0,128,32,3);
-      u8x8.sendBuffer();
-
-      webSock.textAll(vals.toStr().c_str()); delay(1);
-      webSock.cleanupClients();
-      vals.lastMillis=millis();
-  } // END: Update vals
-
-  delay(1);
-}  //  END LOOP
-// WebSock Event Handler: rcv : self - update s_Msg (save/not save); Others' - send via esp_Now
-void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
-  if(type == WS_EVT_DATA){
-    AwsFrameInfo * info = (AwsFrameInfo*)arg;
-    if(info->final && !info->index && info->len == len){
-      if(info->opcode == WS_TEXT){
-        data[len]=0;
-        std::string const s=(char *)data;
-        if(AP_MODE){
-          setCreds(s);
-          AP_MODE=!saveCreds();
-          ESP.restart();
-        }else{
-          setBounds(s);
-          saveBounds();
+    delay(1);
+  }  //  END LOOP
+  // WebSock Event Handler: rcv : self - update s_Msg (save/not save); Others' - send via esp_Now
+  void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
+    if(type == WS_EVT_DATA){
+      AwsFrameInfo * info = (AwsFrameInfo*)arg;
+      if(info->final && !info->index && info->len == len){
+        if(info->opcode == WS_TEXT){
+          data[len]=0;
+          std::string const s=(char *)data;
+          if(AP_MODE){
+            setCreds(s);
+            AP_MODE=!saveCreds();
+            ESP.restart();
+          }else{
+            setBounds(s);
+            saveBounds();
+          }
         }
       }
     }
-  }
-  return;
-} // Web Sock recieve
-void decreaseAirFlow(){ // maxDamper, minDamper, damperIncrement, maxFan, minFan, fanIncrement
-Serial.printf("decreaseAirFlow: %i\n", MAX_DAMPER - vals.draftDamperPos);
-    vals.draftDamperPos += vals.servoIncrement;
-    if(vals.draftDamperPos >= MAX_DAMPER){
-        vals.draftDamperPos = MAX_DAMPER;
-        if(vals.draftFanPct -= vals.fanIncrement < MIN_FAN)
-            vals.draftFanPct = MIN_FAN;
-    }
-}
-void increaseAirFlow(){
-Serial.printf("increaseAirFlow: %i\n", MAX_DAMPER - vals.draftDamperPos);
-  vals.draftDamperPos -= vals.servoIncrement;
-  if(vals.draftDamperPos <= MIN_DAMPER){
-      vals.draftDamperPos = MIN_DAMPER;
-    if(vals.draftFanPct += vals.fanIncrement > MAX_FAN)
-        vals.draftFanPct = MAX_FAN;
-  }
-}
-// ESP NOW  sent call back(cb)
-void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus){
-#ifdef dbg        
-  if (sendStatus == 0){
-    Serial.printf("\nNOW: Delivery success: %s\n", vals.toStr().c_str());Serial.flush();
-  }
-  else{
-    Serial.printf("NOW: Delivery FAIL: %s\n", vals.toStr().c_str());Serial.flush();
-  }
-#endif
-}
-//ESP NOW  call back(cb) OnDataReceive
-void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len){
     return;
+  } // Web Sock recieve
+  void decreaseAirFlow(){ // maxDamper, minDamper, damperIncrement, maxFan, minFan, fanIncrement
+  Serial.printf("decreaseAirFlow: %i\n", MAX_DAMPER - vals.draftDamperPos);
+      vals.draftDamperPos += vals.servoIncrement;
+      if(vals.draftDamperPos >= MAX_DAMPER){
+          vals.draftDamperPos = MAX_DAMPER;
+          if(vals.draftFanPct -= vals.fanIncrement < MIN_FAN)
+              vals.draftFanPct = MIN_FAN;
+      }
   }
-void notFound(AsyncWebServerRequest *request){request->send_P(200, "text/html", INDEX_HTML);}
-bool wifiConnect(WiFiMode m){
-    WiFi.disconnect();
-    WiFi.softAPdisconnect();
-    WiFi.mode(m);
-    switch(m){
-            case WIFI_STA:
-                              WiFi.begin(creds.SSID.c_str(), creds.PWD.c_str());
-                              WiFi.channel(2);
-                              if(!creds.isDHCP)
-                                WiFi.config(creds.IP, creds.GW, creds.MASK);
-                              break;
-            case WIFI_AP:
-                              WiFi.softAPConfig(ip_AP, ip_AP_GW, ip_subNet);
-                              WiFi.softAP(AP_NAME, "");
-                              WiFi.begin();
-                              break;
-            case WIFI_AP_STA: break;
-            case WIFI_OFF:    break;
+  void increaseAirFlow(){
+  Serial.printf("increaseAirFlow: %i\n", MAX_DAMPER - vals.draftDamperPos);
+    vals.draftDamperPos -= vals.servoIncrement;
+    if(vals.draftDamperPos <= MIN_DAMPER){
+        vals.draftDamperPos = MIN_DAMPER;
+      if(vals.draftFanPct += vals.fanIncrement > MAX_FAN)
+          vals.draftFanPct = MAX_FAN;
     }
-    unsigned int startup = millis();
-    while(WiFi.status() != WL_CONNECTED){
-          delay(250);
-          Serial.print(".");
-          if(millis() - startup >= 5000) break;
+  }
+  // ESP NOW  sent call back(cb)
+  void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus){
+  #ifdef dbg        
+    if (sendStatus == 0){
+      Serial.printf("\nNOW: Delivery success: %s\n", vals.toStr().c_str());Serial.flush();
     }
-    Serial.println("");Serial.flush();
-    return(WiFi.status() == WL_CONNECTED);
-}
-void setBounds(const std::string& s){
-  vals.waterAlert=::atoi(valFromJson(s, "waterAlert").c_str());
-  vals.billDay=::atoi(valFromJson(s, "billDay").c_str());
-  vals.pressureDelta=::atof(valFromJson(s, "pressureDelta").c_str());
-  vals.servoIncrement=::atoi(valFromJson(s, "servoIncrement").c_str());
-  vals.fanIncrement=::atoi(valFromJson(s, "fanIncrement").c_str());
-}
-bool saveCreds(){
-  File f = SPIFFS.open(F("/creds.json"), "w");
-  if(f){
-         f.print(creds.toStr().c_str());
-         f.close();
-#ifdef dbg
-  Serial.printf("saveCreds Success: creds: %s\n", creds.toStr().c_str());Serial.flush();
-#endif
-         return true;
+    else{
+      Serial.printf("NOW: Delivery FAIL: %s\n", vals.toStr().c_str());Serial.flush();
+    }
+  #endif
   }
-  else{
-#ifdef dbg
-  Serial.printf("saveCreds FAILED: creds: %s\n", creds.toStr().c_str());Serial.flush();
-#endif
-      return(false);
+  //ESP NOW  call back(cb) OnDataReceive
+  void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len){
+      return;
+    }
+  void notFound(AsyncWebServerRequest *request){request->send_P(200, "text/html", INDEX_HTML);}
+  bool wifiConnect(WiFiMode m){
+      WiFi.disconnect();
+      WiFi.softAPdisconnect();
+      WiFi.mode(m);
+      switch(m){
+              case WIFI_STA:
+                                WiFi.begin(creds.SSID.c_str(), creds.PWD.c_str());
+                                WiFi.channel(2);
+                                if(!creds.isDHCP)
+                                  WiFi.config(creds.IP, creds.GW, creds.MASK);
+                                break;
+              case WIFI_AP:
+                                WiFi.softAPConfig(ip_AP, ip_AP_GW, ip_subNet);
+                                WiFi.softAP(AP_NAME, "");
+                                WiFi.begin();
+                                break;
+              case WIFI_AP_STA: break;
+              case WIFI_OFF:    break;
+      }
+      unsigned int startup = millis();
+      while(WiFi.status() != WL_CONNECTED){
+            delay(250);
+            Serial.print(".");
+            if(millis() - startup >= 5000) break;
+      }
+      Serial.println("");Serial.flush();
+      return(WiFi.status() == WL_CONNECTED);
   }
-}
-bool initCreds(){
-        File f = SPIFFS.open(F("/creds.json"), "r");
-        if(f){
-                std::string s = f.readString().c_str();
-                f.close();
-                setCreds(s);
-        }
-        else return(false);
-#ifdef dbg
-      Serial.printf("\nFailed init creds from SPIFFS: %s\n", creds.toStr().c_str());Serial.flush();
-#endif
-  return(true);
-}
-void setCreds(const std::string& s){
-  creds.SSID=valFromJson(s, "SSID").c_str();
-  creds.PWD=valFromJson(s, "PWD").c_str();
-  creds.isDHCP=::atoi(valFromJson(s, "isDHCP").c_str());
-  creds.IP.fromString(valFromJson(s, "IP").c_str());
-  creds.GW.fromString(valFromJson(s, "GW").c_str());
-  creds.MASK.fromString(valFromJson(s, "MASK").c_str());
-}
-bool saveBounds(){
-  File f = SPIFFS.open(F("/vals.json"), "w");
-  if(f){
-         f.print(vals.toStr().c_str());
-         f.close();
-         return true;
+  void setBounds(const std::string& s){
+    vals.waterAlert=::atoi(valFromJson(s, "waterAlert").c_str());
+    vals.billDay=::atoi(valFromJson(s, "billDay").c_str());
+    vals.pressureDelta=::atof(valFromJson(s, "pressureDelta").c_str());
+    vals.servoIncrement=::atoi(valFromJson(s, "servoIncrement").c_str());
+    vals.fanIncrement=::atoi(valFromJson(s, "fanIncrement").c_str());
   }
-  else{return false;}
-}
-bool initLocalStruct(){
-        File f = SPIFFS.open(F("/vals.json"), "r");
-        if(f){
-                std::string s = f.readString().c_str();
-                f.close();
-                setBounds(s);
-                return(true);
-        }
-        else return(false);
-#ifdef dbg
-        Serial.printf("\nFailed init vals from SPIFFS: %s\n", vals.toStr().c_str());Serial.flush();
-#endif
-}
-  // NOTE: Was getting Stack Dumps when trying to use <ArduinoJson.h>
-  std::string valFromJson(const std::string &json, const std::string &element){
+  bool saveCreds(){
+    File f = SPIFFS.open(F("/creds.json"), "w");
+    if(f){
+          f.print(creds.toStr().c_str());
+          f.close();
+  #ifdef dbg
+    Serial.printf("saveCreds Success: creds: %s\n", creds.toStr().c_str());Serial.flush();
+  #endif
+          return true;
+    }
+    else{
+  #ifdef dbg
+    Serial.printf("saveCreds FAILED: creds: %s\n", creds.toStr().c_str());Serial.flush();
+  #endif
+        return(false);
+    }
+  }
+  bool initCreds(){
+          File f = SPIFFS.open(F("/creds.json"), "r");
+          if(f){
+                  std::string s = f.readString().c_str();
+                  f.close();
+                  setCreds(s);
+          }
+          else return(false);
+  #ifdef dbg
+        Serial.printf("\nFailed init creds from SPIFFS: %s\n", creds.toStr().c_str());Serial.flush();
+  #endif
+    return(true);
+  }
+  void setCreds(const std::string& s){
+    creds.SSID=valFromJson(s, "SSID").c_str();
+    creds.PWD=valFromJson(s, "PWD").c_str();
+    creds.isDHCP=::atoi(valFromJson(s, "isDHCP").c_str());
+    creds.IP.fromString(valFromJson(s, "IP").c_str());
+    creds.GW.fromString(valFromJson(s, "GW").c_str());
+    creds.MASK.fromString(valFromJson(s, "MASK").c_str());
+  }
+  bool saveBounds(){
+    File f = SPIFFS.open(F("/vals.json"), "w");
+    if(f){
+          f.print(vals.toStr().c_str());
+          f.close();
+          return true;
+    }
+    else{return false;}
+  }
+  bool initLocalStruct(){
+          File f = SPIFFS.open(F("/vals.json"), "r");
+          if(f){
+                  std::string s = f.readString().c_str();
+                  f.close();
+                  setBounds(s);
+                  return(true);
+          }
+          else return(false);
+  #ifdef dbg
+          Serial.printf("\nFailed init vals from SPIFFS: %s\n", vals.toStr().c_str());Serial.flush();
+  #endif
+  }
+    // NOTE: Was getting Stack Dumps when trying to use <ArduinoJson.h>
+    std::string valFromJson(const std::string &json, const std::string &element){
+      size_t start, end;
+      start = json.find(element);
+      start = json.find(":", start)+1;
+      if(json.substr(start,1) =="\"")start++;
+      end  = json.find_first_of(",]}\"", start);
+      return(json.substr(start, end-start));
+    }
+  /*
+  // Update value in JSON string.  NOTE: Stack Dumps when trying to use <ArduinoJson.h>
+  void update_JSON(std::string& json, const std::string &element, const std::string &value){
     size_t start, end;
-    start = json.find(element);
-    start = json.find(":", start)+1;
-    if(json.substr(start,1) =="\"")start++;
-    end  = json.find_first_of(",]}\"", start);
-    return(json.substr(start, end-start));
-  }
-/*
-// Update value in JSON string.  NOTE: Stack Dumps when trying to use <ArduinoJson.h>
-void update_JSON(std::string& json, const std::string &element, const std::string &value){
-  size_t start, end;
 
-  start = json.find(element.c_str());
-  start = json.find(":", start)+1;
-  end  = json.find_first_of(",}", start); // commented "{"
-  json = json.substr(0,start) + value + json.substr(end);
-}
-*/
+    start = json.find(element.c_str());
+    start = json.find(":", start)+1;
+    end  = json.find_first_of(",}", start); // commented "{"
+    json = json.substr(0,start) + value + json.substr(end);
+  }
+  */
