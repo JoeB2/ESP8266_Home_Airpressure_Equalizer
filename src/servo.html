@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta name="file" content="servo.html">
+    <meta name="author" content="Joe Belson 20211106">
+    <meta name="what" content="esp8266-12 html for WiFi/OLED connected airpressure balancer for the house">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=480, initial-scale=1.0" />
+    <title id="title">Air Pressure Balancer</title>
+  </head>
+  <style type="text/css">
+    body {color:rgb(0, 0, 0); text-align: center; background-color: #ffffff;  font-family: Calibri, Myriad; font-weight: bold; }
+    table {width: 315px;border: 1px solid black;text-align: center; }
+
+    caption {background-color: #61f035;border: solid;border-width: 1px;font-size:x-large;}
+    th.empty{background-color: rgb(255, 255, 255); border-bottom: 0px; height: 23px;}
+    th.Temperature{background-color: rgb(248, 117, 117);}
+    th.Pressure{background-color: rgb(255, 255, 00);}
+    th.Humidity{background-color: rgb(113, 213, 218);}
+
+    tr:nth-child(even) {background-color: #D6EEEE;}
+    tr:nth-child(odd) { background-color: rgb(218, 218, 218);}
+
+    table .settings{background-color: rgb(138, 247, 134);}
+    table .gallons{background-color: rgb(113, 213, 243);}
+
+  </style>
+
+  <body style="text-align: right;">
+    <input id="bt_help" type="button" onclick="f_help()" value="Help"/>
+  <hr>
+    <table class="valuesTable">
+      <caption id="caption">Servo Position</caption>
+      <th class="servo">Degrees</th>
+      <th class="servo"></th>
+      <tbody>
+            <tr id="outside">
+                <td><input id="degrees"></td>
+                <td><input type="submit" onclick="f_degrees()"></td>
+            </tr>
+        </tbody>
+    </table>
+  </body>
+  <script language = "javascript" type = "text/javascript">
+
+    var j_degrees = JSON.parse('{"degrees":0}');
+
+    const webSock = new WebSocket('ws://'+window.location.hostname+':80');
+    webSock.onopen = function(evt){f_webSockOnOpen(evt);}
+    webSock.onmessage = function(evt){f_webSockOnMessage(evt);}
+    webSock.onerror  = function(evt){f_webSockOnError(evt);}
+
+    function f_webSockOnMessage(evt){
+        if(typeof evt.data === "string"){
+          console.log(evt.data);
+          j=JSON.parse(evt.data);
+        
+          t=document.getElementById("degrees");
+          t.value=j.degrees;
+        }
+    }
+    function f_webSockOnOpen(evt){
+    }
+    function f_webSockOnError(evt){
+                var msg = document.getElementById("msgArea0");
+                msg.style.wordWrap = "break-word";
+                msg.style.color = "red";
+                msg.innerHTML = "WebSock: ERROR";
+    }
+    function f_degrees(){
+        j_degrees.degrees=Number(document.getElementById("degrees").value);
+console.log(j_degrees);
+        webSock.send(JSON.stringify(j_degrees));
+    }
+  </script>
+</html>

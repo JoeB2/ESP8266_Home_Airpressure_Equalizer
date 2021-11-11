@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta name="file" content="settings.html">
+    <meta name="author" content="Joe Belson 20210829">
+    <meta name="what" content="esp8266-12 html for setting thresholds for WiFi/OLED connected airpressure balancer for the house">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=480, initial-scale=1.0" />
+    <title id="title">Air Pressure Balancer - Settings</title>
+  </head>
+  <style type="text/css">
+    body {color:rgb(0, 0, 0); text-align: center; background-color: #ffffff;  font-family: Calibri, Myriad; font-weight: bold; }
+    table {width: 315px;border: 1px solid black;text-align: center; }
+
+    caption {background-color: #61f035;border: solid;border-width: 1px;font-size:x-large;}
+    th.empty{background-color: rgb(255, 255, 255); border-bottom: 0px; height: 23px;}
+    th.Temperature{background-color: rgb(248, 117, 117);}
+    th.Pressure{background-color: rgb(255, 255, 00);}
+    th.Humidity{background-color: rgb(113, 213, 218);}
+
+    tr:nth-child(even) {background-color: #D6EEEE;}
+    tr:nth-child(odd) { background-color: rgb(218, 218, 218);}
+
+    table .settings{background-color: rgb(138, 247, 134);}
+    table .gallons{background-color: rgb(113, 213, 243);}
+
+  </style>
+
+  <body style="text-align: right;">
+    <input id="bt_help" type="button" onclick="f_help()" value="Help"/>
+  <hr>
+    <table class="valuesTable">
+      <caption id="caption">House Internal Air Pressure Settings</caption>
+                <th class="Temperature">Pressure Differential</th>
+                <th class="Pressure">Water Sensor Alert Value (50 - 500)</th>
+                <th class="Damper Degrees">Damper Increment Degrees</th>
+                <th class="Fan Degrees">Fan Increment %</th>
+        <tbody>
+            <tr id="outside">
+                <td><input id="pressureDelta" name="setting"></td>
+                <td><input id="waterAlert" name="setting"></td>
+                <td><input id="servoIncrement" name="setting"></td>
+                <td><input id="fanIncrement" name="setting"></td>
+            </tr>
+        </tbody>
+    </table>
+    <table>
+        <th>Water Bill Day of Month</th>
+      <tbody>
+          <tr>
+              <td><input id="billDay"></td><td><input type="submit" onclick="f_submit()" value="submit"></td>
+          </tr>
+      </tbody>
+    </table>
+    <p></p><p id="msg1" name="msg"></p><p name="msg"></p>
+
+</body>
+  <script language = "javascript" type = "text/javascript">
+
+    const webSock = new WebSocket('ws://'+window.location.hostname+':80');
+    webSock.onopen = function(evt){f_webSockOnOpen(evt);}
+    webSock.onmessage = function(evt){f_webSockOnMessage(evt);}
+    webSock.onerror  = function(evt){f_webSockOnError(evt);}
+
+    function f_webSockOnMessage(evt){
+        if(typeof evt.data === "string")
+            j=JSON.parse(evt.data);
+            lastUpdated = new Date().getTime();
+            document.getElementById("msg1").innerHTML=evt.data;
+            for(var key in j[1])
+                if(document.getElementById(key).value=="")
+                    document.getElementById(key).value = j[1][key];
+    }
+    function f_webSockOnOpen(evt){
+                var msg = document.getElementById("msgArea0");
+                msg.style.wordWrap = "break-word";
+                msg.style.color = "green";
+                msg.innerHTML = "WebSock: CONNECTED"
+    }
+    function f_webSockOnError(evt){
+                var msg = document.getElementById("msgArea0");
+                msg.style.wordWrap = "break-word";
+                msg.style.color = "red";
+                msg.innerHTML = "WebSock: ERROR";
+    }
+    function f_submit(){
+        const s='{"pressureDelta":0,"waterAlert":0,"servoIncrement":0,"fanIncrement":0,"billDay":0}';
+        var j = JSON.parse(s);
+        for(var key in j){
+            j[key]=Number(document.getElementById(key).value);
+        }
+        webSock.send(JSON.stringify(j));
+    }
+    function f_help(){
+        var x=document.getElementsByName("msg");
+        for(var i=0;i<x.length;i++)
+            x[i].style.visibility=x[i].style.visibility=="hidden"?"visible":"hidden";
+    }
+  </script>
+</html>
